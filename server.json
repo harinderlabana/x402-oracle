@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.harinderlabana/x402-oracle",
+  "description": "On-chain crypto oracle for AI agents via x402 (Base USDC): token risk, new pools, gas & wallet.",
+  "repository": {
+    "url": "https://github.com/harinderlabana/x402-oracle",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "x402-oracle-mcp",
+      "version": "0.1.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
