@@ -1,0 +1,11 @@
+{
+  "name": "x402-oracle-mcp",
+  "version": "0.1.0",
+  "description": "MCP stdio wrapper for x402-oracle on-chain AI agent endpoints",
+  "type": "module",
+  "bin": {
+    "x402-oracle-mcp": "./index.ts"
+  },
+  "keywords": ["mcp", "x402", "base", "usdc", "crypto", "ai-agents", "defi"],
+  "license": "MIT"
+}

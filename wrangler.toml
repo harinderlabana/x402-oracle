@@ -1,0 +1,13 @@
+name = "x402-oracle"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Replace with your public Base (0x...) wallet address before deploying.
+# Private keys are NEVER stored here; payments settle directly to this address.
+PAYEE_WALLET = "0xbd68f93368a3289dfd3d7d74b85f85b0e314ca5b"
+X402_NETWORK = "eip155:8453"
+X402_FACILITATOR_URL = "https://facilitator.payai.network"
+SERVICE_NAME = "x402-oracle"
+SERVICE_URL = "https://x402-oracle.sunny-labana.workers.dev"
