@@ -1,4 +1,5 @@
 import { Context } from 'hono';
+import { withEdgeCache } from '../utils/cache';
 import { hexWeiToGwei, jsonRpcCall } from '../utils/rpc';
 
 const EVM_RPCS: Array<{ chain: string; rpcUrl: string }> = [
@@ -39,9 +40,13 @@ export async function computeGasRoute(fetcher: typeof fetch = fetch) {
 
 export function createGasRouteHandler(fetcher: typeof fetch = fetch) {
   return async (c: Context) => {
-    const data = await computeGasRoute(fetcher);
+    const cacheKey = 'https://cache.x402-oracle.internal/v1/gas-route';
+    const { data, cacheHit } = await withEdgeCache(cacheKey, 5, () =>
+      computeGasRoute(fetcher),
+    );
     return c.json(data, 200, {
       'Cache-Control': 'public, max-age=5',
+      'X-Cache': cacheHit ? 'HIT' : 'MISS',
     });
   };
 }

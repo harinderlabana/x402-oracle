@@ -5,6 +5,7 @@ import { computeGasRoute } from '../src/routes/gasRoute';
 import { computeNewPools } from '../src/routes/newPools';
 import { computeTokenRisk } from '../src/routes/tokenRisk';
 import { computeWalletPulse } from '../src/routes/walletPulse';
+import { withEdgeCache } from '../src/utils/cache';
 
 const TEST_WALLET = '0x1111111111111111111111111111111111111111';
 
@@ -106,7 +107,7 @@ describe('x402-oracle discovery & health', () => {
 
 describe('oracle route computation (mocked upstream)', () => {
   it('flags honeypot and low liquidity in computeTokenRisk', async () => {
-    const mockFetch: typeof fetch = async (input) => {
+    const mockFetch: typeof fetch = async (input, init) => {
       const url = String(input);
       if (url.includes('dexscreener.com')) {
         return new Response(
@@ -140,6 +141,22 @@ describe('oracle route computation (mocked upstream)', () => {
           { status: 200 },
         );
       }
+      if (url.includes('mainnet.base.org')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          method?: string;
+        };
+        if (body.method === 'eth_getCode') {
+          return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x60806040' }), {
+            status: 200,
+          });
+        }
+        if (body.method === 'eth_call') {
+          return new Response(
+            JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0xf4240' }), // 1_000_000
+            { status: 200 },
+          );
+        }
+      }
       return new Response('{}', { status: 404 });
     };
 
@@ -153,6 +170,30 @@ describe('oracle route computation (mocked upstream)', () => {
     expect(result.flags).toContain('HONEYPOT_DETECTED');
     expect(result.flags).toContain('LOW_LIQUIDITY_UNDER_10K');
     expect(result.market.symbol).toBe('SCAM');
+    expect(result.onchain.isContract).toBe(true);
+    expect(result.onchain.totalSupplyRaw).toBe('1000000');
+  });
+
+  it('flags non-contract EOA addresses in computeTokenRisk', async () => {
+    const mockFetch: typeof fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes('mainnet.base.org')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { method?: string };
+        if (body.method === 'eth_getCode') {
+          return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x' }), {
+            status: 200,
+          });
+        }
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x' }), {
+          status: 200,
+        });
+      }
+      return new Response('{}', { status: 404 });
+    };
+
+    const result = await computeTokenRisk('base', TEST_WALLET, mockFetch);
+    expect(result.onchain.isContract).toBe(false);
+    expect(result.flags).toContain('NOT_A_CONTRACT_EOA');
   });
 
   it('picks cheapest EVM chain in computeGasRoute', async () => {
@@ -236,5 +277,29 @@ describe('oracle route computation (mocked upstream)', () => {
     expect(result.pools[0].baseTokenAddress).toBe('0xtoken1');
     expect(result.pools[0].verdict).toBe('HIGH_RISK');
     expect(result.pools[0].flags).toContain('VERY_LOW_LIQUIDITY_UNDER_5K');
+  });
+
+  it('caches responses in withEdgeCache and serves HIT on repeat', async () => {
+    const store = new Map<string, Response>();
+    const fakeCache = {
+      match: async (req: Request) => store.get(req.url)?.clone(),
+      put: async (req: Request, res: Response) => {
+        store.set(req.url, res.clone());
+      },
+    } as unknown as Cache;
+
+    let calls = 0;
+    const compute = async () => {
+      calls += 1;
+      return { value: 42 };
+    };
+
+    const first = await withEdgeCache('https://cache.local/test', 30, compute, fakeCache);
+    const second = await withEdgeCache('https://cache.local/test', 30, compute, fakeCache);
+
+    expect(first.cacheHit).toBe(false);
+    expect(second.cacheHit).toBe(true);
+    expect(second.data.value).toBe(42);
+    expect(calls).toBe(1);
   });
 });

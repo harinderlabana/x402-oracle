@@ -1,5 +1,6 @@
 import { Context } from 'hono';
 import { BASE_USDC_ADDRESS } from '../types';
+import { withEdgeCache } from '../utils/cache';
 import { hexToNumber, hexWeiToEth, isValidEvmAddress, jsonRpcCall } from '../utils/rpc';
 
 const BASE_PUBLIC_RPC = 'https://mainnet.base.org';
@@ -58,9 +59,13 @@ export function createWalletPulseHandler(fetcher: typeof fetch = fetch) {
     }
 
     try {
-      const result = await computeWalletPulse(address, fetcher);
-      return c.json(result, 200, {
+      const cacheKey = `https://cache.x402-oracle.internal/v1/wallet-pulse?address=${encodeURIComponent(address.toLowerCase())}`;
+      const { data, cacheHit } = await withEdgeCache(cacheKey, 15, () =>
+        computeWalletPulse(address, fetcher),
+      );
+      return c.json(data, 200, {
         'Cache-Control': 'public, max-age=15',
+        'X-Cache': cacheHit ? 'HIT' : 'MISS',
       });
     } catch (err) {
       return c.json(

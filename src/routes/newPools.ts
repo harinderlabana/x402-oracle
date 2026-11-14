@@ -1,4 +1,5 @@
 import { Context } from 'hono';
+import { withEdgeCache } from '../utils/cache';
 
 const GECKO_NETWORK_MAP: Record<string, string> = {
   base: 'base',
@@ -109,9 +110,13 @@ export function createNewPoolsHandler(fetcher: typeof fetch = fetch) {
     const limit = Number.isFinite(rawLimit) ? rawLimit : 10;
 
     try {
-      const data = await computeNewPools(chain, limit, fetcher);
+      const cacheKey = `https://cache.x402-oracle.internal/v1/new-pools?chain=${encodeURIComponent(chain.toLowerCase())}&limit=${limit}`;
+      const { data, cacheHit } = await withEdgeCache(cacheKey, 10, () =>
+        computeNewPools(chain, limit, fetcher),
+      );
       return c.json(data, 200, {
         'Cache-Control': 'public, max-age=10',
+        'X-Cache': cacheHit ? 'HIT' : 'MISS',
       });
     } catch (err) {
       return c.json(

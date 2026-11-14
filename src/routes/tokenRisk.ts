@@ -1,4 +1,13 @@
 import { Context } from 'hono';
+import { withEdgeCache } from '../utils/cache';
+import { isValidEvmAddress, jsonRpcCall } from '../utils/rpc';
+
+const EVM_PUBLIC_RPCS: Record<string, string> = {
+  base: 'https://mainnet.base.org',
+  optimism: 'https://mainnet.optimism.io',
+  arbitrum: 'https://arb1.arbitrum.io/rpc',
+  ethereum: 'https://cloudflare-eth.com',
+};
 
 const CHAIN_ID_MAP: Record<string, string> = {
   ethereum: '1',
@@ -134,6 +143,38 @@ export async function computeTokenRisk(
     }
   }
 
+  // 3. Direct on-chain bytecode & totalSupply() verification for EVM chains
+  let onchain: { isContract: boolean | null; totalSupplyRaw: string | null } = {
+    isContract: null,
+    totalSupplyRaw: null,
+  };
+  const rpcUrl = EVM_PUBLIC_RPCS[normalizedChain];
+  if (rpcUrl && isValidEvmAddress(normalizedAddr)) {
+    try {
+      const [code, supplyHex] = await Promise.all([
+        jsonRpcCall<string>(rpcUrl, 'eth_getCode', [normalizedAddr, 'latest'], fetcher),
+        jsonRpcCall<string>(
+          rpcUrl,
+          'eth_call',
+          [{ to: normalizedAddr, data: '0x18160ddd' }, 'latest'],
+          fetcher,
+        ).catch(() => '0x'),
+      ]);
+      const isContract = typeof code === 'string' && code !== '0x' && code.length > 2;
+      onchain = {
+        isContract,
+        totalSupplyRaw:
+          supplyHex && supplyHex !== '0x' ? BigInt(supplyHex).toString() : null,
+      };
+      if (!isContract) {
+        riskScore += 50;
+        flags.push('NOT_A_CONTRACT_EOA');
+      }
+    } catch {
+      flags.push('ONCHAIN_RPC_UNAVAILABLE');
+    }
+  }
+
   const boundedScore = Math.min(100, Math.max(0, riskScore));
   const verdict =
     boundedScore >= 65 ? 'HIGH_RISK' : boundedScore >= 35 ? 'MEDIUM_RISK' : 'LOW_RISK';
@@ -145,6 +186,7 @@ export async function computeTokenRisk(
     verdict,
     flags,
     market,
+    onchain,
     checkedAt: new Date().toISOString(),
   };
 }
@@ -161,9 +203,13 @@ export function createTokenRiskHandler(fetcher: typeof fetch = fetch) {
       );
     }
 
-    const result = await computeTokenRisk(chain, address, fetcher);
-    return c.json(result, 200, {
+    const cacheKey = `https://cache.x402-oracle.internal/v1/token-risk?chain=${encodeURIComponent(chain.toLowerCase())}&address=${encodeURIComponent(address.toLowerCase())}`;
+    const { data, cacheHit } = await withEdgeCache(cacheKey, 30, () =>
+      computeTokenRisk(chain, address, fetcher),
+    );
+    return c.json(data, 200, {
       'Cache-Control': 'public, max-age=30',
+      'X-Cache': cacheHit ? 'HIT' : 'MISS',
     });
   };
 }
